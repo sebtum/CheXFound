@@ -7,6 +7,7 @@ from typing import Sequence
 
 import torch
 from torchvision import transforms
+from torchvision.transforms import functional as F
 
 import numpy as np
 
@@ -128,3 +129,44 @@ def make_classification_eval_transform(
     if flip:
         transforms_list.append(transforms.RandomHorizontalFlip(p=1))
     return transforms.Compose(transforms_list)
+
+def make_classification_eval_transform_nocrop(
+    *,
+    target_size: int = 256,
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std:  Sequence[float] = IMAGENET_DEFAULT_STD,
+    flip: bool = False,
+) -> transforms.Compose:
+    interpolation=transforms.InterpolationMode.BICUBIC
+    def resize_and_letterbox(img):
+        # 1) Skalierung: kleinere Kante → target_size
+        img = resize_long_edge(img, target_size, interpolation)
+        # 2) Padding: zentriert auf target_size×target_size auffüllen
+        w, h = img.size
+        pad_w = max(target_size - w, 0)
+        pad_h = max(target_size - h, 0)
+        # (links, oben, rechts, unten)
+        padding = (pad_w // 2, pad_h // 2, pad_w - pad_w // 2, pad_h - pad_h // 2)
+        return F.pad(img, padding, fill=0)
+    
+    transforms_list = [
+        transforms.Lambda(resize_and_letterbox),
+        MaybeToTensor(),
+        RescaleImage(),
+        make_normalize_transform(mean=mean, std=std),
+    ]
+    if flip:
+        # horizontal flip nach Padding/Crop
+        transforms_list.append(T.RandomHorizontalFlip(p=1.0))
+    return transforms.Compose(transforms_list)
+
+def resize_long_edge(img, size, interpolation):
+    w, h = img.size
+    # Größere Kante anpassen
+    if h > w:
+        new_h = size
+        new_w = int(w * size / h)
+    else:
+        new_w = size
+        new_h = int(h * size / w)
+    return F.resize(img, (new_h, new_w), interpolation)

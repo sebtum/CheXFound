@@ -8,9 +8,12 @@ import os
 
 from PIL import Image
 import numpy as np
+import io
 
 import torch
 
+#DATASET_SIZE = 1_000
+DATASET_SIZE = 16_431
 
 class _Split(Enum):
     TRAIN = "train"
@@ -22,7 +25,8 @@ class _Split(Enum):
         split_lengths = {
             _Split.TRAIN: 207_096,  # modify these numbers
             _Split.VAL: 51_775,
-            _Split.TEST: 39_293,
+            #_Split.TEST: 39_293,
+            _Split.TEST: DATASET_SIZE,
         }
         return split_lengths[self]
 
@@ -102,13 +106,25 @@ class CXRLT(ExtendedVisionDataset):
         super().__init__(root, transforms, transform, target_transform)
         self._split = split
         self.labels = pd.read_csv(os.path.join(self.root, self._split.value + '.csv'))
+        # get only the first 10 elements of the labels
+        #self.labels = self.labels.head(DATASET_SIZE)  # FIX ME: remove this line
         self._clean_labels()
-        self.base_dir = '/bulk/yangz16/CXR-LT/mimic-cxr-512'
 
     def get_image_data(self, index: int):
-        img_path = os.path.join(self.base_dir, self.labels.iloc[index]['fpath'])
-        img = Image.open(img_path)
-        img = img.convert(mode="RGB")
+        #img_path = os.path.join(self.base_dir, self.labels.iloc[index]['fpath'])
+        row = self.labels.iloc[index]
+        tar_path = row["tar_path"]
+        offset   = int(row["offset"])
+        size     = int(row["size"])
+        
+        # 1) Lese nur den relevanten Bereich aus dem TAR
+        with open(tar_path, "rb") as f:
+            f.seek(offset)
+            raw = f.read(size)
+        
+        # In-Painting: lade Image aus Bytes
+        img = Image.open(io.BytesIO(raw))
+        img.convert(mode="RGB")
         return img
 
     def _clean_labels(self):

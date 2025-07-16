@@ -14,6 +14,7 @@ import sys
 from typing import List, Optional
 import math
 from glob import glob
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -24,7 +25,7 @@ from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 import pandas as pd
 
 from chexfound.data import SamplerType, make_data_loader, make_dataset
-from chexfound.data.transforms import make_classification_eval_transform, make_classification_train_transform
+from chexfound.data.transforms import make_classification_eval_transform, make_classification_train_transform, make_classification_eval_transform_nocrop
 import chexfound.distributed as distributed
 from chexfound.eval.metrics import MetricType, build_metric
 from chexfound.eval.setup import get_args_parser as get_setup_args_parser
@@ -38,7 +39,7 @@ from chexfound.logging import MetricLogger
 from chexfound.data.wrappers import FewShotDatasetWrapper, SystemicSamplerWrapper
 from chexfound.models.vision_transformer import DinoVisionTransformer
 
-from peft import LoraConfig, get_peft_model
+#from peft import LoraConfig, get_peft_model
 from chexfound.eval.losses import AsymmetricLoss
 
 from chexfound.data.datasets import CXRLT
@@ -231,7 +232,7 @@ def get_args_parser(
         epochs=10,
         val_epochs=None,
         batch_size=128,
-        num_workers=8,
+        num_workers=0,
         epoch_length=None,
         save_checkpoint_frequency=2,
         eval_period_epochs=2,
@@ -936,7 +937,8 @@ def run_infer_cxrlt(
     if test_dataset_str is None:
         raise ValueError("Test dataset cannot be None")
 
-    eval_transform = make_classification_eval_transform(resize_size=image_size, crop_size=image_size, flip=flip)
+    #eval_transform = make_classification_eval_transform(resize_size=image_size, crop_size=image_size, flip=flip)
+    eval_transform = make_classification_eval_transform_nocrop(target_size=image_size, flip=flip)
 
     test_dataset = make_dataset(
         dataset_str=test_dataset_str,
@@ -1001,7 +1003,7 @@ def run_infer_cxrlt(
         sampler_type=None,
         drop_last=False,
         shuffle=False,
-        persistent_workers=False,
+        persistent_workers=False, # FIXME: True,
         collate_fn=collate_fn,
     )
 
@@ -1030,12 +1032,14 @@ def run_infer_cxrlt(
     df_dict = {'dicom_id': dicom_ids}
     df_dict.update({class_names[i]: preds[:,i] for i in range(len(class_names))})
     df = pd.DataFrame(df_dict,)
-    df.to_csv(os.path.join(output_dir, 'cxrlt_submission.csv'), index=False)
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    df.to_csv(os.path.join(output_dir, f'cxrlt_submission_{ts}.csv'), index=False)
     return
 
 
 def main(args):
     model, autocast_dtype = setup_and_build_model(args)
+    print(args)
     run = partial(run_eval_linear,
                   model=model,
                   train_dataset_str=args.train_dataset_str,
@@ -1117,6 +1121,7 @@ def main(args):
         if 'CXRLT' not in args.test_dataset_str:
             run_infer()
         else:
+            print('running cxrlt inference')
             run_cxrlt()
     return 0
 
