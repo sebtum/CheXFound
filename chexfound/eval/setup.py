@@ -63,7 +63,8 @@ def build_model_for_eval(config, pretrained_weights):
     if pretrained_weights is not None:  # zf
         dinov2_utils.load_pretrained_weights(model, pretrained_weights, "teacher")
     model.eval()
-    model.cuda()
+    if torch.cuda.is_available():
+        model.cuda()
     return model
 
 

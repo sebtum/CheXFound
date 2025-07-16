@@ -293,7 +293,7 @@ def make_data_loader(
         advance=sampler_advance,
     )
 
-    logger.info("using PyTorch data loader")
+    logger.info(f"using PyTorch data loader with persistent workers: {persistent_workers}")
     data_loader = torch.utils.data.DataLoader(
         dataset,
         sampler=sampler,

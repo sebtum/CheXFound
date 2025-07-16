@@ -251,8 +251,11 @@ def enable(*, set_cuda_current_device: bool = True, overwrite: bool = False, all
     torch_env = _TorchDistributedEnvironment()
     torch_env.export(overwrite=overwrite)
 
-    if set_cuda_current_device:
+    # only set GPU device if CUDA is actually available
+    if set_cuda_current_device and torch.cuda.is_available():
         torch.cuda.set_device(torch_env.local_rank)
+    #if set_cuda_current_device:
+    #    torch.cuda.set_device(torch_env.local_rank)
 
     if allow_nccl_timeout:
         # This allows to use torch distributed timeout in a NCCL backend

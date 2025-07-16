@@ -6,6 +6,7 @@
 import math
 import logging
 import os
+import torch
 
 from omegaconf import OmegaConf
 
@@ -47,8 +48,16 @@ def get_cfg_from_args(args):
 
 
 def default_setup(args):
+    #if not distributed.is_enabled():
+    #    distributed.enable(overwrite=True)
+    # Enable distributed only if CUDA is available (or explicitly requested)
     if not distributed.is_enabled():
-        distributed.enable(overwrite=True)
+        # Skip enabling CUDA device setting on CPU-only environments
+        if torch.cuda.is_available():
+            distributed.enable(overwrite=True)
+        else:
+            # Monkey-patch so later calls to set_device are no-ops
+            distributed._set_cuda_device = lambda *a, **k: None
     seed = getattr(args, "seed", 0)
     rank = distributed.get_global_rank()
 

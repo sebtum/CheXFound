@@ -125,7 +125,8 @@ def setup_glori(sample_output, n_last_blocks_list, learning_rates, avgpools=[Fal
                     num_classes=num_classes, decoder_embedding=decoder_dim,
                     initial_num_features=out_dim, use_n_blocks=n, multiview=multiview, cat_cls=cat_cls,
                 )
-                linear_classifier = linear_classifier.cuda()
+                if torch.cuda.is_available():
+                    linear_classifier = linear_classifier.cuda()
                 linear_classifiers_dict[
                     f"linear:blocks={n}:avgpool={avgpool}:lr={lr:.10f}".replace(".", "_")
                 ] = linear_classifier
