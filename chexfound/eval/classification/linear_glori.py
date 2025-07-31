@@ -237,6 +237,7 @@ def get_args_parser(
         save_checkpoint_frequency=2,
         eval_period_epochs=2,
         learning_rates=[1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1],
+#        learning_rates=[2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3],
         backbone_learning_rate=1e-5,
         n_last_blocks=[4],
         avgpools=[False],
@@ -301,18 +302,24 @@ def evaluate_linear_classifiers(
     best_classifier = ""
     eval_metric = str(list(metric)[0])
 
-    for i, (classifier_string, metric) in enumerate(results_dict_temp.items()):
-        logger.info(f"{prefixstring} -- Classifier: {classifier_string} * {metric}")
+    for classifier_string, metric in results_dict_temp.items():
+        m = metric[eval_metric]
+        score = m.mean().item() if m.numel() > 1 else m.item()
+        logger.info(f"{prefixstring} -- Classifier: {classifier_string} "
+                    f"* Raw metrics: {metric}, mean of first metric: {score:.4f}")
         if (
-            best_classifier_on_val is None and metric[eval_metric].item() > max_score
+            best_classifier_on_val is None and score > max_score
         ) or classifier_string == best_classifier_on_val:
-            max_score = metric[eval_metric].item()
+            max_score = score
             best_classifier = classifier_string
 
-    results_dict["best_classifier"] = {"name": best_classifier, "results": apply_method_to_nested_values(
-                                                                            results_dict_temp[best_classifier],
-                                                                            method_name="item",
-                                                                            nested_types=(dict))}
+    raw_results = results_dict_temp[best_classifier]
+    native_results = convert_tensors(raw_results)
+
+    results_dict["best_classifier"] = {
+        "name":    best_classifier,
+        "results": native_results
+    }
 
     logger.info(f"best classifier: {results_dict['best_classifier']}") 
 
@@ -325,7 +332,25 @@ def evaluate_linear_classifiers(
 
     return results_dict
 
+def tensor_to_python(x: torch.Tensor):
+    if x.numel() > 1:
+        return x.tolist()
+    else:
+        return x.item()
 
+def convert_tensors(obj):
+    """
+    Recursively walk dicts/lists and convert any torch.Tensor to native Python.
+    """
+    if isinstance(obj, dict):
+        return {k: convert_tensors(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_tensors(v) for v in obj]
+    elif isinstance(obj, torch.Tensor):
+        return tensor_to_python(obj)
+    else:
+        return obj
+    
 @torch.no_grad()
 def evaluate_linear_classifiers_preds(
     feature_model,
@@ -404,6 +429,7 @@ def eval_linear(
     logger.info("Starting training from iteration {}".format(start_iter))
     metric_logger = MetricLogger(delimiter="  ")
     header = "Training"
+    cnt = 0
     for data, labels in metric_logger.log_every(
         train_data_loader,
         10,
@@ -430,7 +456,12 @@ def eval_linear(
                 labels = torch.where(labels < 0, 0, labels)
                 losses[f"loss_{k}"] = nn.BCEWithLogitsLoss(weight=weight, reduction='sum')(v.float(), labels.float())
                 if focal_loss:
+                    if cnt < 100:
+                        logger.info(f"loss_{k} (bce) = {losses[f'loss_{k}'].item()}")
                     losses[f"loss_{k}"] += AsymmetricLoss(weight=weight)(v.float(), labels.float())
+                    if cnt < 100:
+                        logger.info(f"loss_{k} (focal) = {losses[f'loss_{k}'].item()}")
+                        cnt += 1
         else:
             # loss_fn = nn.BCEWithLogitsLoss() if num_of_classes == 1 else nn.CrossEntropyLoss()
             loss_fn = nn.BCEWithLogitsLoss(reduction='sum') if num_of_classes == 1 else nn.CrossEntropyLoss(reduction='sum')
@@ -525,7 +556,7 @@ def run_eval_linear(
     peft=None,
     image_size=224,
     num_samples=None,
-    focal_loss=False,
+    focal_loss=True,
     multiview=False,
     glori=False,
     weight_decay=1e-2,
@@ -548,18 +579,23 @@ def run_eval_linear(
     train_dataset, val_dataset, test_dataset = make_datasets(train_dataset_str=train_dataset_str, val_dataset_str=val_dataset_str,
                                                         test_dataset_str=test_dataset_str, train_transform=train_transform,
                                                         eval_transform=eval_transform)
+    num_of_classes = test_dataset.get_num_classes() # FIXME: Workaround for using num samples
+    is_multilabel = test_dataset.is_multilabel()
+    is_3d = test_dataset.is_3d()
     if shots != None:
         logger.info(f"Running dataset in {shots}-shot setting")
         train_dataset = FewShotDatasetWrapper(train_dataset, shots=shots)
     elif num_samples != None:
         logger.info(f"Running dataset with {num_samples} samples only")
         train_dataset = SystemicSamplerWrapper(train_dataset, num_samples=num_samples)
+        val_dataset = SystemicSamplerWrapper(val_dataset, num_samples=num_samples)
+        test_dataset = SystemicSamplerWrapper(test_dataset, num_samples=num_samples)
 
     batch_size = train_dataset.__len__() if batch_size > train_dataset.__len__() else batch_size
-    num_of_classes = test_dataset.get_num_classes()
+    #num_of_classes = test_dataset.get_num_classes()
     num_of_classes = 1 if num_of_classes == 2 else num_of_classes
-    is_multilabel = test_dataset.is_multilabel()
-    is_3d = test_dataset.is_3d()
+    #is_multilabel = test_dataset.is_multilabel()
+    #is_3d = test_dataset.is_3d()
     collate_fn = None if not is_3d else collate_fn_3d
 
     n_last_blocks = max(n_last_blocks_list)
@@ -937,8 +973,8 @@ def run_infer_cxrlt(
     if test_dataset_str is None:
         raise ValueError("Test dataset cannot be None")
 
-    #eval_transform = make_classification_eval_transform(resize_size=image_size, crop_size=image_size, flip=flip)
-    eval_transform = make_classification_eval_transform_nocrop(target_size=image_size, flip=flip)
+    eval_transform = make_classification_eval_transform(resize_size=image_size, crop_size=image_size, flip=flip)
+    #eval_transform = make_classification_eval_transform_nocrop(target_size=image_size, flip=flip)
 
     test_dataset = make_dataset(
         dataset_str=test_dataset_str,

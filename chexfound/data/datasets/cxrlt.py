@@ -12,8 +12,8 @@ import io
 
 import torch
 
-#DATASET_SIZE = 1_000
-DATASET_SIZE = 16_431
+DATASET_SIZE = 1_000
+#DATASET_SIZE = 16_431
 
 class _Split(Enum):
     TRAIN = "train"
@@ -23,9 +23,11 @@ class _Split(Enum):
     @property
     def length(self) -> int:
         split_lengths = {
-            _Split.TRAIN: 207_096,  # modify these numbers
-            _Split.VAL: 51_775,
-            #_Split.TEST: 39_293,
+            #_Split.TRAIN: 131_823,  # modify these numbers
+            #_Split.VAL: 16_400,
+            #_Split.TEST: 16_431,  # modify these numbers
+            _Split.TRAIN: DATASET_SIZE,  # modify these numbers
+            _Split.VAL: DATASET_SIZE,
             _Split.TEST: DATASET_SIZE,
         }
         return split_lengths[self]
@@ -107,7 +109,7 @@ class CXRLT(ExtendedVisionDataset):
         self._split = split
         self.labels = pd.read_csv(os.path.join(self.root, self._split.value + '.csv'))
         # get only the first 10 elements of the labels
-        #self.labels = self.labels.head(DATASET_SIZE)  # FIX ME: remove this line
+        self.labels = self.labels.head(DATASET_SIZE)  # FIX ME: remove this line
         self._clean_labels()
 
     def get_image_data(self, index: int):
@@ -128,7 +130,8 @@ class CXRLT(ExtendedVisionDataset):
         return img
 
     def _clean_labels(self):
-        classes = list(self.labels.columns[-40:])
+        classes = list(self.labels.columns[-8:])
+        #classes = list(self.labels.columns[-40:])
         self.targets = self.labels[classes].to_numpy()
         self.class_names = classes
 
